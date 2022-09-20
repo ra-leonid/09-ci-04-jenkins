@@ -14,7 +14,7 @@ create_vm:
       --memory 4 \
       --cores 2 
 	yc compute instance create \
-      --name agent \
+      --name agent-01 \
       --zone ru-central1-a \
       --network-interface subnet-name=my-subnet-a,nat-ip-version=ipv4 \
       --create-boot-disk image-folder-id=standard-images,image-family=centos-7 \
@@ -26,7 +26,7 @@ destroy: destroy_vm destroy_net
 
 destroy_vm:
 	yc compute instance delete jenkins
-	yc compute instance delete agent_01
+	yc compute instance delete agent-01
 
 destroy_net:
 	yc vpc subnet delete --name my-subnet-a

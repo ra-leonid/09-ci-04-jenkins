@@ -56,6 +56,14 @@
         key: "{{ lookup('pipe', 'ssh-keyscan {{ hostvars[item].ansible_host }}') }}"
         hash_host: true
       with_items: "{{ groups.jenkins_agents }}"
+    - name: Ensure github are present in known_hosts file
+      become: true
+      become_user: "{{ jenkins_user_name }}"
+      known_hosts:
+        name: "github.com"
+        state: present
+        key: "{{ lookup('pipe', 'ssh-keyscan github.com') }}"
+        hash_host: true
     - name: Start Jenkins
       become: true
       systemd:
@@ -63,13 +71,6 @@
         state: restarted
         enabled: true
       when: jenkins_installed is changed
-    - name: Copy known_hosts file
-      become: true
-      become_user: "{{ jenkins_user_name }}"
-      ansible.builtin.copy:
-        src: known_hosts
-        dest: ~/.ssh/known_hosts
-        mode: '0644'
 - name: Prepare jenkins agent
   hosts: jenkins_agents
   become: true
@@ -87,22 +88,41 @@
         state: directory
         owner: "{{ jenkins_user_name }}"
         group: "{{ jenkins_user_group }}"
-    - name: Copy known_hosts file
-      become: true
-      become_user: "{{ jenkins_user_name }}"
-      ansible.builtin.copy:
-        src: known_hosts
-        dest: ~/.ssh/known_hosts
-        mode: '0644'
     - name: Add docker repo
       become_user: root
       get_url:
         url: https://download.docker.com/linux/centos/docker-ce.repo
         dest: /etc/yum.repos.d/docker-ce.repo
         validate_certs: false
+    - name: Find repo files
+      ansible.builtin.find:
+        paths: /etc/yum.repos.d
+        file_type: file
+        patterns: 'CentOS-*'
+      register: repo_files
+    - name: comment line 'mirrorlist=' in files
+      become_user: root
+      #become: true
+      replace:
+        path: "{{ item.path }}"
+        regexp: '^mirrorlist='
+        replace: '#mirrorlist='
+      loop:
+        "{{ repo_files.files }}"
+
+    - name: replace line '#baseurl' in files
+      become_user: root
+      #become: true
+      replace:
+        path: "{{ item.path }}"
+        regexp: '#baseurl=http://mirror.centos.org'
+        replace: 'baseurl=http://mirror.centos.org'
+      loop:
+        "{{ repo_files.files }}"
     - name: Install some required
       become_user: root
       yum:
+        update_cache: true
         name:
           - git
           - python3
@@ -122,14 +142,26 @@
         executable: pip3
         name:
           - selinux
-          - ansible<3.0
+          - ansible
+          - molecule==3.4.0
+          - molecule_docker
+          - ansible-lint==5.4.0
+          - yamllint
+          - pyOpenSSL
+          - cryptography
         state: present
-    - name: Reinstall Selinux
+    - name: Reinstall pip3 packages
       become_user: root
       pip:
         executable: pip3
         name:
           - selinux
+          - requests==2.27.1
+          - urllib3==1.25.11
+          - chardet==4.0.0
+          - charset_normalizer==2.0.0
+          - pyOpenSSL
+          - cryptography
         state: forcereinstall
     - name: Add local to PATH
       lineinfile:
@@ -160,4 +192,12 @@
       until: install_agent is succeeded
       retries: 10
       timeout: 10
+    - name: Ensure github are present in known_hosts file
+      become: true
+      become_user: "{{ jenkins_user_name }}"
+      known_hosts:
+        name: "github.com"
+        state: present
+        key: "{{ lookup('pipe', 'ssh-keyscan github.com') }}"
+        hash_host: true
 
