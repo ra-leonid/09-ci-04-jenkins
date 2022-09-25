@@ -1,0 +1,185 @@
+---
+- name: Preapre all hosts
+  hosts: all
+  tasks:
+    - name: Create group
+      become: true
+      group:
+        name: "{{ user_group }}"
+        state: present
+    - name: Create user
+      become: true
+      user:
+        name: "{{ user_name }}"
+        generate_ssh_key: true
+      register: ssh_key_info
+    - name: Install JDK
+      become: true
+      package:
+        update_cache: true
+        name: openjdk-11-jre
+        state: present
+    - name: Ensure github are present in known_hosts file
+      #become: true
+      become_user: "{{ jenkins_user_name }}"
+      known_hosts:
+        name: "github.com"
+        state: present
+        key: "{{ lookup('pipe', 'ssh-keyscan github.com') }}"
+        hash_host: true
+
+- name: Get Jenkins master installed
+  hosts: jenkins_masters
+  tasks:
+    - name: Add Jenkins key
+      become: true
+      apt_key:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io.key
+        state: present
+        validate_certs: false
+    - name: Touch a file, using symbolic modes to set the permissions (equivalent to 0644)
+      become: true
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/jenkins.list
+        state: touch
+        mode: u=rw,g=r,o=r
+    - name: Add address to the servers sources.list
+      become: true
+      lineinfile:
+        dest: /etc/apt/sources.list.d/jenkins.list
+        line: "deb http://pkg.jenkins.io/debian-stable binary/"
+    - name: Install Jenkins and requirements
+      become: true
+      package:
+        update_cache: true
+        name:
+          - fontconfig
+          - jenkins
+          - git
+        state: present
+      register: jenkins_installed
+    - name: Ensure jenkins agents are present in known_hosts file
+      become: true
+      become_user: "{{ jenkins_user_name }}"
+      known_hosts:
+        name: "{{ hostvars[item].ansible_host }}"
+        state: present
+        key: "{{ lookup('pipe', 'ssh-keyscan {{ hostvars[item].ansible_host }}') }}"
+        hash_host: true
+      with_items: "{{ groups.jenkins_agents }}"
+    - name: Start Jenkins
+      become: true
+      systemd:
+        name: jenkins
+        state: restarted
+        enabled: true
+      when: jenkins_installed is changed
+- name: Prepare jenkins agent
+  hosts: jenkins_agents
+  become: true
+  become_user: "{{ jenkins_user_name }}"
+  tags: agent
+  tasks:
+    - name: Print the gateway for each host when defined
+      ansible.builtin.debug:
+        msg: "{{hostvars['jenkins-master-01']['ssh_key_info']['ssh_public_key']}}"
+    - name: Add master publickey into authorized_key
+      #become: true
+      #become_method: su
+      #become_flags: '-s /bin/sh'
+      #become_user: "{{ jenkins_user_name }}"
+      authorized_key:
+        user: "{{ jenkins_user_name }}"
+        state: present
+        key: "{{ hostvars['jenkins-master-01']['ssh_key_info']['ssh_public_key'] }}"
+    - name: Create agent_dir
+      become_user: root
+      #become: true
+      file:
+        path: "{{ jenkins_agent_dir }}"
+        state: directory
+        owner: "{{ jenkins_user_name }}"
+        group: "{{ jenkins_user_group }}"
+    - name: Add Docker GPG key
+      #become: true
+      become_user: root
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+    - name: Add Docker APT repository
+      #become: true
+      become_user: root
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/{{ ansible_system | lower }}/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable
+    - name: Install package
+      #become: true
+      become_user: root
+      package:
+        update_cache: true
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - git
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - python3
+          - python3-pip
+        state: present
+    - name: Update pip
+      #become: true
+      become_user: root
+      pip:
+        executable: pip3
+        name: pip
+        extra_args: --upgrade
+    - name: Install Ansible
+      #become: true
+      become_user: root
+      pip:
+        executable: pip3
+        name:
+          - ansible
+          - molecule
+          - molecule_docker
+          - ansible-lint
+          - yamllint
+        state: present
+    - name: Add local to PATH
+      #become: true
+      #become_user: "{{ jenkins_user_name }}"
+      lineinfile:
+        dest: ~/.bashrc
+        regexp: export PATH=$PATH:/home/jenkins/.local/bin
+        line: export PATH=$PATH:/home/jenkins/.local/bin
+    - name: Create docker group
+      #become: true
+      become_user: root
+      group:
+        name: docker
+        state: present
+    - name: Add jenkinsuser to dockergroup
+      #become: true
+      become_user: root
+      user:
+        name: "{{ jenkins_user_name }}"
+        groups: docker
+    - name: Restart docker
+      #become: true
+      become_user: root
+      systemd:
+        name: docker
+        state: restarted
+        enabled: true
+    - name: Install agent.jar
+      #become: true
+      #become_user: "{{ jenkins_user_name }}"
+      get_url:
+        url: "http://{{ hostvars['jenkins-master-01']['ansible_host'] }}:8080/jnlpJars/agent.jar"
+        dest: "{{ jenkins_agent_dir }}"
+      register: install_agent
+      until: install_agent is succeeded
+      retries: 10
+      timeout: 10
+

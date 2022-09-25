@@ -9,7 +9,7 @@ create_vm:
       --name jenkins \
       --zone ru-central1-a \
       --network-interface subnet-name=my-subnet-a,nat-ip-version=ipv4 \
-      --create-boot-disk image-folder-id=standard-images,image-family=centos-7 \
+      --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-2004-lts \
       --ssh-key ~/.ssh/id_rsa.pub \
       --memory 4 \
       --cores 2 
@@ -17,10 +17,10 @@ create_vm:
       --name agent-01 \
       --zone ru-central1-a \
       --network-interface subnet-name=my-subnet-a,nat-ip-version=ipv4 \
-      --create-boot-disk image-folder-id=standard-images,image-family=centos-7 \
+      --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-2004-lts \
       --ssh-key ~/.ssh/id_rsa.pub \
       --memory 4 \
-      --cores 2 
+      --cores 2
 
 destroy: destroy_vm destroy_net
 
